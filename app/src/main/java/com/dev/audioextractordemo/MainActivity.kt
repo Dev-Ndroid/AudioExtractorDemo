@@ -99,8 +99,8 @@ class MainActivity : AppCompatActivity() {
             val recorder = Recorder.Builder()
                 .setQualitySelector(
                     QualitySelector.from(
-                        Quality.HIGHEST,
-                        FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
+                        Quality.LOWEST,
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
                     )
                 )
                 .build()
@@ -345,7 +345,106 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    /*private fun captureVideo() {
+        // Check if the VideoCapture use case has been created: if not, do nothing.
+        val videoCapture = this.videoCapture ?: return
 
+        viewBinding.videoCaptureButton.isEnabled = false
+
+        // If there is an active recording in progress, stop it and release the current recording.
+        // We will be notified when the captured video file is ready to be used by our application.
+        val curRecording = recording
+        if (curRecording != null) {
+            curRecording.stop()
+            recording = null
+            return
+        }
+
+        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
+            .format(System.currentTimeMillis())
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+
+            // Create a subdirectory path within the cache directory
+            val subDirPath = "CameraX-Video"
+            val filePath = File(cacheDir, subDirPath)
+
+            // Create the subdirectory if it doesn't exist
+            filePath.mkdirs()
+
+            // Store the file in the subdirectory
+            put(MediaStore.MediaColumns.DATA, filePath.absolutePath)
+        }
+
+        val mediaStoreOutputOptions = MediaStoreOutputOptions
+            .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+            .setContentValues(contentValues)
+            .build()
+
+        recording = videoCapture.output
+            .prepareRecording(this, mediaStoreOutputOptions)
+            .apply {
+                if (ActivityCompat.checkSelfPermission(this@MainActivity, RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+                withAudioEnabled()
+            }
+            .start(ContextCompat.getMainExecutor(this@MainActivity)) { recordEvent ->
+                when (recordEvent) {
+                    is VideoRecordEvent.Start -> {
+                        viewBinding.videoCaptureButton.apply {
+                            text = getString(R.string.stop_capture)
+                            isEnabled = true
+                        }
+                    }
+                    is VideoRecordEvent.Finalize -> {
+                        if (!recordEvent.hasError()) {
+                            val msg =
+                                "Video capture succeeded: ${recordEvent.outputResults.outputUri}"
+
+                            Log.e(
+                                "Video capture succeeded",
+                                "RECORDED URI: ${recordEvent.outputResults.outputUri}"
+                            )
+                            val uri = recordEvent.outputResults.outputUri
+                            val path = FileUtils.getPath(this, uri)
+                            Log.e("Video capture succeeded", "RECORDED URI PATH: $path")
+
+                            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                            path?.let { videoPath ->
+                                val compressedVideoPath = compressVideo(videoPath)
+                                Log.e("Compressed Video Path:", compressedVideoPath)
+                            }
+                        } else {
+                            recording?.close()
+                            recording = null
+                            Log.e(TAG, "Video capture ends with error: ${recordEvent.error}")
+                        }
+                        viewBinding.videoCaptureButton.apply {
+                            text = getString(R.string.start_capture)
+                            isEnabled = true
+                        }
+                    }
+                }
+            }
+    }*/
+
+    /*private fun compressVideo(videoPath: String): String {
+        val outputDir = cacheDir
+        val outputFile = File(outputDir, "compressedVideo.mp4")
+        val compressedVideoPath = outputFile.absolutePath
+
+        val command =
+            "-i $videoPath -vf scale=720:-1 -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k $compressedVideoPath"
+
+        FFmpeg.execute(command)
+
+        return compressedVideoPath
+    }*/
 
 
 }
