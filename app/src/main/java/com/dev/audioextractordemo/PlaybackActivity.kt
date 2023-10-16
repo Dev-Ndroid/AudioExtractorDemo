@@ -29,8 +29,8 @@ class PlaybackActivity : AppCompatActivity() {
 
          // Replace this with the actual method to retrieve the recorded video URI
         Log.e("PATH", "STRING: $path || PATH: ${path.toUri()}")
-        binding.videoView.setVideoURI(Uri.fromFile(File(path)))
-        binding.videoView.start()
+//        binding.videoView.setVideoURI(Uri.fromFile(File(path)))
+//        binding.videoView.start()
 
     }
 }
