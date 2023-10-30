@@ -1,7 +1,6 @@
 package com.dev.audioextractordemo
 
 import android.Manifest.permission.*
-import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -21,20 +22,24 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.PermissionChecker
-import com.arthenica.mobileffmpeg.Config
-import com.arthenica.mobileffmpeg.Config.RETURN_CODE_CANCEL
-import com.arthenica.mobileffmpeg.Config.RETURN_CODE_SUCCESS
-import com.arthenica.mobileffmpeg.ExecuteCallback
-import com.arthenica.mobileffmpeg.FFmpeg
+import androidx.lifecycle.lifecycleScope
+import com.abedelazizshe.lightcompressorlibrary.CompressionListener
+import com.abedelazizshe.lightcompressorlibrary.VideoCompressor
+import com.abedelazizshe.lightcompressorlibrary.VideoQuality
+import com.abedelazizshe.lightcompressorlibrary.config.Configuration
+import com.abedelazizshe.lightcompressorlibrary.config.SaveLocation
+import com.abedelazizshe.lightcompressorlibrary.config.SharedStorageConfiguration
 import com.dev.audioextractordemo.databinding.ActivityMainBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.nio.ByteBuffer
 
 
 class MainActivity : AppCompatActivity() {
@@ -47,10 +52,14 @@ class MainActivity : AppCompatActivity() {
     private var recording: Recording? = null
 
     private lateinit var cameraExecutor: ExecutorService
+    var name = ""
 
     val videoPath = "/path/to/video.mp4"
     var outputAudioPath = ""
     lateinit var extractedAudioPath: String
+
+    private var secondsRemaining = 0 // Initial time in seconds
+    private var timerJob: Job? = null
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +67,13 @@ class MainActivity : AppCompatActivity() {
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (!Environment.isExternalStorageManager()) {
+                val getpermission = Intent()
+                getpermission.action = Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                startActivity(getpermission)
+            }
+        }
         // Request camera permissions
         if (allPermissionsGranted()) {
             startCamera()
@@ -66,19 +82,33 @@ class MainActivity : AppCompatActivity() {
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
             )
         }
+        startCamera()
 
 
-        viewBinding.audioPlayButton.setOnClickListener {
-            playAudio()
+
+        viewBinding.videoCaptureButton.setOnClickListener {
+            captureVideo()
         }
-
-        viewBinding.videoCaptureButton.setOnClickListener { captureVideo() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
     }
+
+   /* fun compressFf(filePath: String) {
+
+        val rc = FFmpeg.execute("-i $filePath -c:v mpeg4 file2.mp4");
+
+        if (rc == RETURN_CODE_SUCCESS) {
+            Log.i(Config.TAG, "Command execution completed successfully.");
+        } else if (rc == RETURN_CODE_CANCEL) {
+            Log.i(Config.TAG, "Command execution cancelled by user.");
+        } else {
+            Log.i(Config.TAG, String.format("Command execution failed with rc=%d and the output below.", rc));
+            Config.printLastCommandOutput(Log.INFO);
+        }
+    }*/
 
 
     private fun startCamera() {
@@ -100,7 +130,7 @@ class MainActivity : AppCompatActivity() {
                 .setQualitySelector(
                     QualitySelector.from(
                         Quality.LOWEST,
-                        FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
                     )
                 )
                 .build()
@@ -121,8 +151,96 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    // Compression using LightCompressor Library
+    private fun processVideo(uriList: List<Uri>) {
+           /* val filePath = SiliCompressor.with(this).compressVideo(uriList.first(), Environment.DIRECTORY_MOVIES )
+            Log.e("COMPRESSION", "Compressed FIle Path: $filePath")*/
+        lifecycleScope.launch {
+            VideoCompressor.start(
+                context = applicationContext,
+                uriList,
+                isStreamable = false,
+                sharedStorageConfiguration = SharedStorageConfiguration(
+                    saveAt = SaveLocation.movies,
+                    subFolderName = "Compressed-Videos"
+                ),
+                configureWith = Configuration(
+                    videoNames = listOf(name),
+                    quality = VideoQuality.MEDIUM,
+                    isMinBitrateCheckEnabled = false,
+//                    videoBitrateInMbps = 1,
+                    disableAudio = false,
+                    keepOriginalResolution = false
+                ),
+                listener = object : CompressionListener {
+                    override fun onProgress(index: Int, percent: Float) {
 
-     private fun captureVideo() {
+                        Log.e("Compression", "Compression Percentage: $percent")
+                    }
+
+                    override fun onStart(index: Int) {
+                        Log.e("Compression", "Compression Started")
+
+                    }
+
+                    override fun onSuccess(index: Int, size: Long, path: String?) {
+
+//                        FileHelper.zip(path, "/storage/emulated/0/Movies/my-demo-videos", "ZippedVideo.zip", false)
+                        val destinationDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+
+                        // Specify the name of the zipped file
+                        val destinationFileName = "ZippedVideoFIle.7z"
+                        Log.e("Compression", "Compression Success: $path || MOVIES PATH : $destinationDirectory")
+                        // Call the zip method to create the zip file
+                        if (FileHelper.zip(path, destinationDirectory.absolutePath+"/ZippedVideos", destinationFileName, false)) {
+                            Log.d("Zip", "Zipped file saved in Movies folder")
+                        } else {
+                            Log.e("Zip", "Failed to zip and save the file")
+                        }
+                    }
+
+                    override fun onFailure(index: Int, failureMessage: String) {
+                        Log.e("Compression", "Compression Failed: $failureMessage")
+                    }
+
+                    override fun onCancelled(index: Int) {
+                        Log.e("Compression", "compression has been cancelled")
+                        // make UI changes, cleanup, etc
+                    }
+                },
+            )
+        }
+    }
+
+    private fun startTimer() {
+        timerJob = CoroutineScope(Dispatchers.IO).launch {
+            while (secondsRemaining <= 10) {
+                // Update your UI elements with the remaining time
+                // textView.text = secondsRemaining.toString()
+                runOnUiThread {
+                    viewBinding.timerTv.text = secondsRemaining.toString()
+                }
+                if (secondsRemaining == 10) {
+                    runOnUiThread {
+                        viewBinding.timerTv.text = secondsRemaining.toString()
+                        viewBinding.videoCaptureButton.callOnClick()
+                        viewBinding.timerTv.text = "0"
+                        viewBinding.timerTv.visibility - View.GONE
+                        secondsRemaining = 0
+                    }
+                    break
+                }
+                // Delay for 1 second
+                delay(1000)
+                secondsRemaining++
+            }
+
+            // Timer has finished, handle this event
+            // For example, show a message or perform an action
+        }
+    }
+
+    private fun captureVideo() {
         // Check if the VideoCapture use case has been created: if not, do nothing.
         val videoCapture = this.videoCapture ?: return
 
@@ -137,7 +255,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
+        name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
             .format(System.currentTimeMillis())
 
         val contentValues = ContentValues().apply {
@@ -145,14 +263,14 @@ class MainActivity : AppCompatActivity() {
             put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
 
             // Create a subdirectory path within the cache directory
-            val subDirPath = "CameraX-Video"
-            val filePath = File(cacheDir, subDirPath)
-
-            // Create the subdirectory if it doesn't exist
-            filePath.mkdirs()
-
-            // Store the file in the subdirectory
-            put(MediaStore.MediaColumns.DATA, filePath.absolutePath)
+//            val subDirPath = "CameraX-Video"
+//            val filePath = File(cacheDir, subDirPath)
+//
+//            // Create the subdirectory if it doesn't exist
+//            filePath.mkdirs()
+//
+//            // Store the file in the subdirectory
+//            put(MediaStore.MediaColumns.DATA, filePath.absolutePath)
         }
 
 
@@ -165,7 +283,8 @@ class MainActivity : AppCompatActivity() {
             .prepareRecording(this, mediaStoreOutputOptions)
             .apply {
                 if (ActivityCompat.checkSelfPermission(this@MainActivity, RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED) {
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
                     return
                 }
                 withAudioEnabled()
@@ -177,7 +296,10 @@ class MainActivity : AppCompatActivity() {
                             text = getString(com.dev.audioextractordemo.R.string.stop_capture)
                             isEnabled = true
                         }
+                        viewBinding.timerTv.visibility = View.VISIBLE
+                        startTimer()
                     }
+
                     is VideoRecordEvent.Finalize -> {
                         if (!recordEvent.hasError()) {
                             val msg =
@@ -188,15 +310,18 @@ class MainActivity : AppCompatActivity() {
                                 "RECORDED URI: ${recordEvent.outputResults.outputUri}"
                             )
                             val uri = recordEvent.outputResults.outputUri
+                            val uriList = mutableListOf<Uri>()
+                            uriList.add(uri)
+                            processVideo(uriList)
                             val path = FileUtils.getPath(this, uri)
                             Log.e("Video capture succeeded", "RECORDED URI PATH: $path")
 
                             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                             path?.let { videoPath ->
-                                extractAudioFromVideo(videoPath) {
+                                /*extractAudioFromVideo(videoPath) {
 
                                 }
-                                extractImageFrames(videoPath)
+                                extractImageFrames(videoPath)*/
                             }
 
 
@@ -214,46 +339,6 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-
-    private fun extractImageFrames(videoPath: String) {
-        // Implement image frame extraction logic here
-        // You can use FFmpeg or MediaMetadataRetriever to extract frames at specific times
-
-        try {
-            Log.e("URI", videoPath)
-            val mediaMetadataRetriever = MediaMetadataRetriever()
-            val file = File(videoPath)
-            mediaMetadataRetriever.setDataSource(file.absolutePath)
-
-            val timeInSeconds1 = 5
-            val timeInSeconds2 = 10
-// Original Vid
-// Save images and Audio Files.
-            val frame1 = mediaMetadataRetriever.getFrameAtTime(
-                (timeInSeconds1 * 1000000).toLong(),
-                MediaMetadataRetriever.OPTION_CLOSEST
-            )
-//            val frame2 = mediaMetadataRetriever.getFrameAtTime((timeInSeconds2 * 1000000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
-
-            // Use the extracted frames as needed
-            // For example, display them in an ImageView
-//        imageView1.setImageBitmap(frame1)
-//        imageView2.setImageBitmap(frame2)
-
-            val intent = Intent(this, PlaybackActivity::class.java)
-
-            intent.putExtra("URI", videoPath)
-
-            Helper.frame1 = frame1
-            startActivity(intent)
-            // Remember to release the MediaMetadataRetriever
-//            mediaMetadataRetriever.release()
-        } catch (ex: Exception) {
-            // something went wrong with the file, ignore it and continue
-            Log.e("MY_EXCEPTION", ex.toString())
-        }
-
-    }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
@@ -301,150 +386,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-
-    private fun extractAudioFromVideo(videoUri: String, onSucces: (String) -> Unit) {
-        val outputDir = cacheDir
-        val outputFile = File(outputDir, "extractedAudio.aac")
-        extractedAudioPath = outputFile.absolutePath
-
-        val command = "-i $videoUri -vn -c:a copy $extractedAudioPath"
-
-        FFmpeg.executeAsync(command, object : ExecuteCallback {
-            override fun apply(executionId: Long, returnCode: Int) {
-                if (returnCode == Config.RETURN_CODE_SUCCESS) {
-                    // Extraction successful
-                    Log.e("AUDIO_EXTRACTION", "COMPLETE")
-                    onSucces.invoke("XYZ")
-                } else {
-                    // Extraction failed
-                    Log.e("AUDIO_EXTRACTION", "FAILED")
-                }
-            }
-        })
-    }
-
-    private fun playAudio() {
-        val mediaPlayer = MediaPlayer()
-        try {
-            mediaPlayer.setDataSource(extractedAudioPath)
-            mediaPlayer.prepare()
-            mediaPlayer.start()
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }
-
-        mediaPlayer.setOnCompletionListener { mp ->
-            // Handle completion event
-        }
-
-        mediaPlayer.setOnErrorListener { mp, what, extra ->
-            // Handle error event
-            true // Return true to indicate that the error has been handled
-        }
-    }
-
-
-    /*private fun captureVideo() {
-        // Check if the VideoCapture use case has been created: if not, do nothing.
-        val videoCapture = this.videoCapture ?: return
-
-        viewBinding.videoCaptureButton.isEnabled = false
-
-        // If there is an active recording in progress, stop it and release the current recording.
-        // We will be notified when the captured video file is ready to be used by our application.
-        val curRecording = recording
-        if (curRecording != null) {
-            curRecording.stop()
-            recording = null
-            return
-        }
-
-        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
-            .format(System.currentTimeMillis())
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-
-            // Create a subdirectory path within the cache directory
-            val subDirPath = "CameraX-Video"
-            val filePath = File(cacheDir, subDirPath)
-
-            // Create the subdirectory if it doesn't exist
-            filePath.mkdirs()
-
-            // Store the file in the subdirectory
-            put(MediaStore.MediaColumns.DATA, filePath.absolutePath)
-        }
-
-        val mediaStoreOutputOptions = MediaStoreOutputOptions
-            .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            .setContentValues(contentValues)
-            .build()
-
-        recording = videoCapture.output
-            .prepareRecording(this, mediaStoreOutputOptions)
-            .apply {
-                if (ActivityCompat.checkSelfPermission(this@MainActivity, RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED
-                ) {
-                    return
-                }
-                withAudioEnabled()
-            }
-            .start(ContextCompat.getMainExecutor(this@MainActivity)) { recordEvent ->
-                when (recordEvent) {
-                    is VideoRecordEvent.Start -> {
-                        viewBinding.videoCaptureButton.apply {
-                            text = getString(R.string.stop_capture)
-                            isEnabled = true
-                        }
-                    }
-                    is VideoRecordEvent.Finalize -> {
-                        if (!recordEvent.hasError()) {
-                            val msg =
-                                "Video capture succeeded: ${recordEvent.outputResults.outputUri}"
-
-                            Log.e(
-                                "Video capture succeeded",
-                                "RECORDED URI: ${recordEvent.outputResults.outputUri}"
-                            )
-                            val uri = recordEvent.outputResults.outputUri
-                            val path = FileUtils.getPath(this, uri)
-                            Log.e("Video capture succeeded", "RECORDED URI PATH: $path")
-
-                            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-                            path?.let { videoPath ->
-                                val compressedVideoPath = compressVideo(videoPath)
-                                Log.e("Compressed Video Path:", compressedVideoPath)
-                            }
-                        } else {
-                            recording?.close()
-                            recording = null
-                            Log.e(TAG, "Video capture ends with error: ${recordEvent.error}")
-                        }
-                        viewBinding.videoCaptureButton.apply {
-                            text = getString(R.string.start_capture)
-                            isEnabled = true
-                        }
-                    }
-                }
-            }
-    }*/
-
-    /*private fun compressVideo(videoPath: String): String {
-        val outputDir = cacheDir
-        val outputFile = File(outputDir, "compressedVideo.mp4")
-        val compressedVideoPath = outputFile.absolutePath
-
-        val command =
-            "-i $videoPath -vf scale=720:-1 -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k $compressedVideoPath"
-
-        FFmpeg.execute(command)
-
-        return compressedVideoPath
-    }*/
 
 
 }
